@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Work Hours Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'media',
+      safelist: [
+        'bg-blue-100','text-blue-700','text-blue-800',
+        'bg-blue-900/60','text-blue-200','text-blue-600','text-blue-400',
+        'bg-green-100','text-green-700','text-green-800',
+        'bg-green-900/60','text-green-200','text-green-600','text-green-400',
+        'bg-red-100','text-red-800','bg-red-900/60','text-red-200',
+        'text-red-500','text-red-400',
+        'bg-orange-100','text-orange-700','bg-orange-900/60','text-orange-200',
+        'text-orange-500','text-orange-400',
+        'text-gray-300','text-gray-400','text-gray-600',
+        'bg-blue-50','bg-gray-50','bg-gray-100',
+        'dark:bg-blue-900/20','dark:bg-gray-700/60','dark:bg-gray-800/60'
+      ]
+    }
+  </script>
+  <style>
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+    [v-cloak] { display: none; }
+    /* Sticky thead works with border-collapse in modern Chrome/Firefox */
+    .hours-table { border-collapse: collapse; }
+    .hours-table th { position: sticky; top: 49px; z-index: 10; }
+  </style>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+
+<div id="app" v-cloak>
+
+  <!-- ── Sticky page header ──────────────────────────── -->
+  <header class="sticky top-0 z-20 bg-white dark:bg-gray-800
+                 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
+    <div class="max-w-5xl mx-auto flex items-center justify-between">
+      <h1 class="text-base font-semibold tracking-tight">Work Hours Tracker</h1>
+      <span class="px-3 py-1 rounded-full text-sm font-medium" :class="statusCls(onTrackStatus)">
+        {{ statusLabel(onTrackStatus) }}
+      </span>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 py-5 space-y-5">
+
+    <!-- ── Controls ──────────────────────────────────── -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm
+                border border-gray-100 dark:border-gray-700 space-y-4">
+
+      <div class="flex flex-wrap gap-4 items-end">
+
+        <div>
+          <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Month</label>
+          <select v-model="selectedMonth"
+            class="border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm
+                   bg-white dark:bg-gray-700 dark:text-gray-100
+                   focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option v-for="(name, i) in MONTH_NAMES" :key="i" :value="i + 1">{{ name }}</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Year</label>
+          <select v-model="selectedYear"
+            class="border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm
+                   bg-white dark:bg-gray-700 dark:text-gray-100
+                   focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Monthly goal (hours)</label>
+          <input type="number" min="0" step="1"
+            :value="goalHours"
+            @change="setGoalHours($event)"
+            class="border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm w-28
+                   bg-white dark:bg-gray-700 dark:text-gray-100
+                   focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+
+        <div class="sm:ml-auto">
+          <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+            Fill unplanned days from today
+          </label>
+          <div class="flex gap-2">
+            <input type="number" min="0" max="24" step="0.5"
+              v-model.number="fillHours"
+              class="border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm w-20
+                     bg-white dark:bg-gray-700 dark:text-gray-100
+                     focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <button @click="fillRemaining()"
+              class="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800
+                     text-white text-sm font-medium rounded-lg transition-colors">
+              Fill
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Month-level notes -->
+      <div>
+        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Month notes</label>
+        <textarea
+          :value="monthNotes"
+          @change="setMonthNotes($event)"
+          rows="2"
+          placeholder="Optional notes for this month…"
+          class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm
+                 bg-white dark:bg-gray-700 dark:text-gray-100
+                 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none
+                 placeholder:text-gray-300 dark:placeholder:text-gray-600"></textarea>
+      </div>
+
+    </div>
+
+    <!-- ── Summary cards ──────────────────────────────── -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-700">
+        <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Monthly Goal</p>
+        <p class="text-2xl font-bold mt-2 text-gray-900 dark:text-gray-100">{{ fmtH(goalHours) }}</p>
+      </div>
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-700">
+        <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Planned</p>
+        <p class="text-2xl font-bold mt-2 text-blue-600 dark:text-blue-400">{{ fmtH(totalPlanned) }}</p>
+      </div>
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-700">
+        <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Actual</p>
+        <p class="text-2xl font-bold mt-2 text-green-600 dark:text-green-400">{{ fmtH(totalActual) }}</p>
+      </div>
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-700">
+        <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Remaining</p>
+        <p class="text-2xl font-bold mt-2"
+           :class="remainingGoal <= 0 ? 'text-green-600 dark:text-green-400' : 'text-orange-500 dark:text-orange-400'">
+          {{ fmtH(remainingGoal) }}
+        </p>
+      </div>
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-700">
+        <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Remaining Days</p>
+        <p class="text-2xl font-bold mt-2 text-gray-900 dark:text-gray-100">{{ futureWorkdays.length }}</p>
+      </div>
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-700">
+        <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Avg Required</p>
+        <p class="text-2xl font-bold mt-2"
+           :class="avgRequired > 10 ? 'text-red-500 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'">
+          {{ fmtH(avgRequired) }}
+        </p>
+      </div>
+
+    </div>
+
+    <!-- ── Day table ──────────────────────────────────── -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm
+                border border-gray-200 dark:border-gray-600 overflow-hidden">
+
+      <div class="flex items-center justify-between px-4 py-3
+                  border-b border-gray-200 dark:border-gray-600">
+        <h2 class="text-sm font-medium">Daily Hours</h2>
+        <label class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400
+                      cursor-pointer select-none">
+          <input type="checkbox" v-model="showWeekends" class="accent-blue-600" />
+          Show weekends
+        </label>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm hours-table">
+          <thead>
+            <tr class="bg-gray-100 dark:bg-gray-700">
+              <th class="text-left px-3 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300
+                         border border-gray-300 dark:border-gray-600 w-24 bg-gray-100 dark:bg-gray-700">Date</th>
+              <th class="text-left px-3 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300
+                         border border-gray-300 dark:border-gray-600 w-12 bg-gray-100 dark:bg-gray-700">Day</th>
+              <th class="text-right px-3 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300
+                         border border-gray-300 dark:border-gray-600 w-24 bg-gray-100 dark:bg-gray-700">Planned</th>
+              <th class="text-right px-3 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300
+                         border border-gray-300 dark:border-gray-600 w-24 bg-gray-100 dark:bg-gray-700">Actual</th>
+              <th class="text-right px-3 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300
+                         border border-gray-300 dark:border-gray-600 w-16 bg-gray-100 dark:bg-gray-700">Diff</th>
+              <th class="text-right px-3 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300
+                         border border-gray-300 dark:border-gray-600 w-24 bg-gray-100 dark:bg-gray-700">Running</th>
+              <th class="text-left px-3 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300
+                         border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700">Notes</th>
+            </tr>
+          </thead>
+          <tbody ref="tableBody">
+            <tr v-for="d in visibleDays" :key="d" :class="rowCls(d)">
+
+              <!-- Date -->
+              <td class="px-3 py-1.5 border border-gray-300 dark:border-gray-600 whitespace-nowrap">
+                <span class="flex items-center gap-1.5 text-gray-700 dark:text-gray-300">
+                  {{ fmtDate(d) }}
+                  <span v-if="d === todayStr" class="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
+                </span>
+              </td>
+
+              <!-- Day name -->
+              <td class="px-3 py-1.5 border border-gray-300 dark:border-gray-600
+                         text-gray-500 dark:text-gray-400 text-xs">
+                {{ getDayName(d) }}
+              </td>
+
+              <!-- Planned -->
+              <td class="px-1 py-1 border border-gray-300 dark:border-gray-600 text-right">
+                <input v-if="!isWeekend(d)"
+                  type="number" min="0" max="24" step="0.5"
+                  :value="days[d] && days[d].plannedHours != null ? days[d].plannedHours : ''"
+                  data-nav
+                  @change="setPlanned(d, $event)"
+                  @keydown.enter.prevent="onEnter($event)"
+                  @paste.prevent="handlePaste(d, 'planned', $event)"
+                  class="w-full text-right rounded px-2 py-1 transition-all
+                         bg-transparent border border-transparent
+                         hover:border-gray-300 dark:hover:border-gray-500
+                         focus:border-blue-400 focus:bg-white dark:focus:bg-gray-700
+                         focus:outline-none focus:ring-1 focus:ring-blue-400
+                         text-gray-700 dark:text-gray-200" />
+                <span v-else class="text-gray-300 dark:text-gray-600 text-xs px-2">—</span>
+              </td>
+
+              <!-- Actual — cell gets subtle tint when filled -->
+              <td class="px-1 py-1 border border-gray-300 dark:border-gray-600 text-right"
+                  :class="days[d] && days[d].actualHours != null
+                    ? 'bg-gray-50 dark:bg-gray-700/60' : ''">
+                <input v-if="!isWeekend(d)"
+                  type="number" min="0" max="24" step="0.5"
+                  :value="days[d] && days[d].actualHours != null ? days[d].actualHours : ''"
+                  data-nav
+                  @change="setActual(d, $event)"
+                  @keydown.enter.prevent="onEnter($event)"
+                  @paste.prevent="handlePaste(d, 'actual', $event)"
+                  class="w-full text-right rounded px-2 py-1 transition-all
+                         bg-transparent border border-transparent
+                         hover:border-gray-300 dark:hover:border-gray-500
+                         focus:border-blue-400 focus:bg-white dark:focus:bg-gray-700
+                         focus:outline-none focus:ring-1 focus:ring-blue-400
+                         text-gray-700 dark:text-gray-200" />
+                <span v-else class="text-gray-300 dark:text-gray-600 text-xs px-2">—</span>
+              </td>
+
+              <!-- Diff -->
+              <td class="px-3 py-1.5 border border-gray-300 dark:border-gray-600
+                         text-right font-medium tabular-nums text-xs"
+                :class="diffCls(dayStats[d] && dayStats[d].diff)">
+                {{ fmtDiff(dayStats[d] && dayStats[d].diff) }}
+              </td>
+
+              <!-- Running total -->
+              <td class="px-3 py-1.5 border border-gray-300 dark:border-gray-600
+                         text-right tabular-nums text-xs text-gray-600 dark:text-gray-300">
+                {{ fmtH(dayStats[d] && dayStats[d].running) }}
+              </td>
+
+              <!-- Day notes -->
+              <td class="px-1 py-1 border border-gray-300 dark:border-gray-600">
+                <input v-if="!isWeekend(d)"
+                  type="text"
+                  :value="days[d] && days[d].notes ? days[d].notes : ''"
+                  placeholder="Add a note…"
+                  @change="setNotes(d, $event)"
+                  class="w-full rounded px-2 py-1 transition-all min-w-[140px]
+                         bg-transparent border border-transparent
+                         hover:border-gray-300 dark:hover:border-gray-500
+                         focus:border-blue-400 focus:bg-white dark:focus:bg-gray-700
+                         focus:outline-none focus:ring-1 focus:ring-blue-400
+                         text-gray-600 dark:text-gray-300 text-xs
+                         placeholder:text-gray-300 dark:placeholder:text-gray-600" />
+              </td>
+
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── Burndown chart ──────────────────────────────── -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm
+                border border-gray-100 dark:border-gray-700">
+      <h2 class="text-sm font-medium mb-4">Burndown Chart</h2>
+      <div class="relative h-72">
+        <canvas ref="chartCanvas"></canvas>
+        <div v-if="!hasChartData"
+          class="absolute inset-0 flex items-center justify-center
+                 text-sm text-gray-400 dark:text-gray-500">
+          Enter planned hours to see the burndown chart
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Month history ──────────────────────────────── -->
+    <div v-if="history.length > 0"
+      class="bg-white dark:bg-gray-800 rounded-xl shadow-sm
+             border border-gray-100 dark:border-gray-700 overflow-hidden">
+
+      <div class="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+        <h2 class="text-sm font-medium">Month History</h2>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm hours-table">
+          <thead>
+            <tr class="bg-gray-100 dark:bg-gray-700">
+              <th class="text-left px-4 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300
+                         border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700">Month</th>
+              <th class="text-right px-4 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300
+                         border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700">Goal</th>
+              <th class="text-right px-4 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300
+                         border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700">Actual</th>
+              <th class="text-right px-4 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300
+                         border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700">% Achieved</th>
+              <th class="text-center px-4 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300
+                         border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in history"
+              :key="row.type === 'year' ? 'yr-' + row.year : row.key"
+              :class="row.type === 'year'
+                ? 'bg-gray-100 dark:bg-gray-700/80 font-semibold'
+                : row.isCurrent
+                  ? 'bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-50'
+                  : 'hover:bg-gray-50 dark:hover:bg-gray-700/30'">
+
+              <!-- Year total row -->
+              <td v-if="row.type === 'year'"
+                class="px-4 py-2 border border-gray-300 dark:border-gray-600
+                       text-gray-700 dark:text-gray-200 text-xs uppercase tracking-wide">
+                {{ row.year }} — Annual Total
+              </td>
+              <td v-if="row.type === 'year'"
+                class="px-4 py-2 border border-gray-300 dark:border-gray-600
+                       text-right tabular-nums text-gray-700 dark:text-gray-200">
+                {{ row.totalGoal }}h
+              </td>
+              <td v-if="row.type === 'year'"
+                class="px-4 py-2 border border-gray-300 dark:border-gray-600
+                       text-right tabular-nums text-gray-700 dark:text-gray-200">
+                {{ row.totalActual }}h
+              </td>
+              <td v-if="row.type === 'year'"
+                class="px-4 py-2 border border-gray-300 dark:border-gray-600
+                       text-right tabular-nums font-semibold"
+                :class="row.pct >= 100 ? 'text-green-600 dark:text-green-400' : 'text-orange-500 dark:text-orange-400'">
+                {{ row.pct }}%
+              </td>
+              <td v-if="row.type === 'year'"
+                class="border border-gray-300 dark:border-gray-600"></td>
+
+              <!-- Regular month row -->
+              <td v-if="row.type !== 'year'"
+                class="px-4 py-2 border border-gray-300 dark:border-gray-600
+                       font-medium text-gray-700 dark:text-gray-200">
+                {{ row.label }}
+              </td>
+              <td v-if="row.type !== 'year'"
+                class="px-4 py-2 border border-gray-300 dark:border-gray-600
+                       text-right tabular-nums text-gray-600 dark:text-gray-300">
+                {{ row.goal }}h
+              </td>
+              <td v-if="row.type !== 'year'"
+                class="px-4 py-2 border border-gray-300 dark:border-gray-600
+                       text-right tabular-nums text-gray-600 dark:text-gray-300">
+                {{ row.actual }}h
+              </td>
+              <td v-if="row.type !== 'year'"
+                class="px-4 py-2 border border-gray-300 dark:border-gray-600
+                       text-right tabular-nums font-medium"
+                :class="row.pct >= 100 ? 'text-green-600 dark:text-green-400' : 'text-orange-500 dark:text-orange-400'">
+                {{ row.pct }}%
+              </td>
+              <td v-if="row.type !== 'year'"
+                class="px-4 py-2 border border-gray-300 dark:border-gray-600 text-center">
+                <span class="px-2 py-0.5 rounded-full text-xs font-medium" :class="row.badgeCls">
+                  {{ row.badgeLabel }}
+                </span>
+              </td>
+
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+</div><!-- #app -->
+
+<script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script>
+const { createApp, ref, reactive, computed, watch, onMounted, nextTick } = Vue
+
+// ── Date helpers ──────────────────────────────────────────────────────────────
+
+function getTodayStr() {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`
+}
+
+function getAllDaysInMonth(year, month) {
+  const days = []
+  const d = new Date(year, month - 1, 1)
+  while (d.getMonth() === month - 1) {
+    days.push(`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`)
+    d.setDate(d.getDate() + 1)
+  }
+  return days
+}
+
+function isWeekend(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return [0, 6].includes(new Date(y, m-1, d).getDay())
+}
+
+function getDayName(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(y, m-1, d).toLocaleDateString('en-US', { weekday: 'short' })
+}
+
+function fmtDate(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(y, m-1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function getMonthLabel(monthKey) {
+  const [y, m] = monthKey.split('-').map(Number)
+  return new Date(y, m-1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+}
+
+function pad(n) { return String(n).padStart(2, '0') }
+
+// ── Storage ───────────────────────────────────────────────────────────────────
+
+const STORAGE_KEY = 'workHoursTracker_v1'
+
+function loadAll() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') }
+  catch { return {} }
+}
+
+function saveMonth(key, data) {
+  const all = loadAll()
+  all[key] = data
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(all))
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
+
+createApp({
+  setup() {
+    const todayStr = getTodayStr()
+    const now = new Date()
+
+    // ── State ────────────────────────────────────────────────────────────────
+    const selectedYear  = ref(now.getFullYear())
+    const selectedMonth = ref(now.getMonth() + 1)
+    const goalHours     = ref(160)
+    const monthNotes    = ref('')
+    const days          = reactive({})
+    const showWeekends  = ref(false)
+    const fillHours     = ref(8)
+    const chartCanvas   = ref(null)
+    const tableBody     = ref(null)
+
+    let chartInstance = null
+
+    const monthKey = computed(() => `${selectedYear.value}-${pad(selectedMonth.value)}`)
+
+    // ── Data loading ──────────────────────────────────────────────────────────
+
+    function initMonth() {
+      const existing = loadAll()[monthKey.value]
+      const allDays  = getAllDaysInMonth(selectedYear.value, selectedMonth.value)
+      for (const k of Object.keys(days)) delete days[k]
+      goalHours.value  = existing?.goalHours  ?? 160
+      monthNotes.value = existing?.monthNotes ?? ''
+      for (const dateStr of allDays) {
+        days[dateStr] = {
+          plannedHours: existing?.days?.[dateStr]?.plannedHours ?? null,
+          actualHours:  existing?.days?.[dateStr]?.actualHours  ?? null,
+          notes:        existing?.days?.[dateStr]?.notes        ?? ''
+        }
+      }
+    }
+
+    function persist() {
+      const sparse = {}
+      for (const [k, v] of Object.entries(days)) {
+        if (v.plannedHours !== null || v.actualHours !== null || v.notes) {
+          sparse[k] = { plannedHours: v.plannedHours, actualHours: v.actualHours }
+          if (v.notes) sparse[k].notes = v.notes
+        }
+      }
+      saveMonth(monthKey.value, {
+        goalHours:  goalHours.value,
+        monthNotes: monthNotes.value || undefined,
+        days:       sparse
+      })
+    }
+
+    // ── Setters ───────────────────────────────────────────────────────────────
+
+    function setGoalHours(e) {
+      goalHours.value = e.target.value === '' ? 0 : Number(e.target.value)
+      persist()
+    }
+
+    function setMonthNotes(e) {
+      monthNotes.value = e.target.value
+      persist()
+    }
+
+    function setPlanned(dateStr, e) {
+      days[dateStr].plannedHours = e.target.value === '' ? null : Number(e.target.value)
+      persist()
+    }
+
+    function setActual(dateStr, e) {
+      days[dateStr].actualHours = e.target.value === '' ? null : Number(e.target.value)
+      persist()
+    }
+
+    function setNotes(dateStr, e) {
+      days[dateStr].notes = e.target.value
+      persist()
+    }
+
+    // Sets plannedHours on every unplanned weekday from today onward
+    function fillRemaining() {
+      const h = Number(fillHours.value)
+      if (isNaN(h) || h < 0) return
+      for (const [dateStr, day] of Object.entries(days)) {
+        if (!isWeekend(dateStr) && dateStr >= todayStr && day.plannedHours === null) {
+          day.plannedHours = h
+        }
+      }
+      persist()
+    }
+
+    // ── Paste across multiple cells ───────────────────────────────────────────
+    // Clipboard text from Excel/Sheets: tab-separated columns, newline-separated rows.
+    // Single column → fills the focused field going down.
+    // Two columns   → fills planned (col 0) and actual (col 1) going down.
+
+    function handlePaste(dateStr, field, e) {
+      const text = (e.clipboardData || window.clipboardData).getData('text') || ''
+      // Normalise Windows (\r\n) and old Mac (\r) line endings
+      const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split('\n')
+      const rows  = lines.map(l => l.split('\t').map(v => v.trim()))
+
+      const wds      = weekdays.value
+      const startIdx = wds.indexOf(dateStr)
+      if (startIdx === -1) return
+
+      rows.forEach((row, i) => {
+        const target = wds[startIdx + i]
+        if (!target || !days[target]) return
+
+        if (row.length === 1) {
+          // Single-column paste: fill only the focused field
+          const num = row[0] === '' ? null : parseFloat(row[0])
+          if (row[0] !== '' && isNaN(num)) return
+          days[target][field === 'planned' ? 'plannedHours' : 'actualHours'] = num
+        } else {
+          // Two-column paste: left = planned, right = actual
+          const pNum = row[0] === '' ? null : parseFloat(row[0])
+          const aNum = row[1] === '' ? null : parseFloat(row[1])
+          if (row[0] === '' || !isNaN(pNum)) days[target].plannedHours = pNum
+          if (row[1] === '' || !isNaN(aNum)) days[target].actualHours  = aNum
+        }
+      })
+      persist()
+    }
+
+    // ── Computed lists ────────────────────────────────────────────────────────
+
+    const allDays  = computed(() => getAllDaysInMonth(selectedYear.value, selectedMonth.value))
+    const weekdays = computed(() => allDays.value.filter(d => !isWeekend(d)))
+    const visibleDays = computed(() =>
+      showWeekends.value ? allDays.value : weekdays.value
+    )
+
+    const pastWorkdays   = computed(() => weekdays.value.filter(d => d < todayStr))
+    const futureWorkdays = computed(() =>
+      weekdays.value.filter(d => d > todayStr && (days[d]?.actualHours ?? null) === null)
+    )
+
+    // ── Summary metrics ───────────────────────────────────────────────────────
+
+    const totalPlanned = computed(() =>
+      weekdays.value.reduce((s, d) => s + (days[d]?.plannedHours ?? 0), 0)
+    )
+    const totalActual = computed(() =>
+      weekdays.value.reduce((s, d) => s + (days[d]?.actualHours ?? 0), 0)
+    )
+    const remainingGoal = computed(() => Math.max(0, goalHours.value - totalActual.value))
+    const avgRequired   = computed(() => {
+      const n = futureWorkdays.value.length
+      return n > 0 ? remainingGoal.value / n : 0
+    })
+
+    const onTrackStatus = computed(() => {
+      const passed = weekdays.value.filter(d => d <= todayStr).length
+      const total  = weekdays.value.length
+      if (passed === 0 || total === 0 || goalHours.value === 0) return 'on-track'
+      const ideal  = (goalHours.value * passed) / total
+      const actual = totalActual.value
+      if (actual >= ideal * 1.05) return 'ahead'
+      if (actual >= ideal * 0.95) return 'on-track'
+      return 'behind'
+    })
+
+    // ── Per-row table stats ───────────────────────────────────────────────────
+
+    const dayStats = computed(() => {
+      const stats  = {}
+      let running  = 0
+      for (const d of allDays.value) {
+        const actual  = days[d]?.actualHours  ?? null
+        const planned = days[d]?.plannedHours ?? null
+        if (actual !== null) running += actual
+        stats[d] = {
+          diff:    actual !== null && planned !== null
+                     ? Math.round((actual - planned) * 10) / 10
+                     : null,
+          running: actual !== null ? Math.round(running * 10) / 10 : null
+        }
+      }
+      return stats
+    })
+
+    // ── Row background class ──────────────────────────────────────────────────
+    // Hierarchy: weekends → today → past → future
+
+    function rowCls(d) {
+      if (isWeekend(d)) return 'opacity-40'
+      if (d === todayStr) return 'bg-blue-50 dark:bg-blue-900/20'
+      if (d < todayStr)  return 'bg-gray-50 dark:bg-gray-800/60'
+      // future
+      return 'bg-white dark:bg-gray-800 hover:bg-blue-50/30 dark:hover:bg-gray-700/30'
+    }
+
+    // ── Chart ─────────────────────────────────────────────────────────────────
+
+    const chartSeriesData = computed(() => {
+      const wds = weekdays.value
+      if (!wds.length) return null
+      const labels = ['Start'], ideal = [0], planned = [0], actual = [0]
+      let iAcc = 0, pAcc = 0, aAcc = 0, lastActualIdx = 0
+
+      wds.forEach((d, i) => {
+        labels.push(fmtDate(d))
+        iAcc += goalHours.value / wds.length
+        ideal.push(Math.round(iAcc * 10) / 10)
+        pAcc += days[d]?.plannedHours ?? 0
+        planned.push(Math.round(pAcc * 10) / 10)
+        const a = days[d]?.actualHours ?? null
+        if (a !== null) {
+          aAcc += a
+          actual.push(Math.round(aAcc * 10) / 10)
+          lastActualIdx = i + 1
+        } else actual.push(null)
+      })
+
+      const trimActual = actual.map((v, i) => i <= lastActualIdx ? v : null)
+      return { labels, ideal, planned, actual: trimActual }
+    })
+
+    const hasChartData = computed(() => !!chartSeriesData.value)
+
+    function buildChartOptions() {
+      const isDark    = window.matchMedia('(prefers-color-scheme: dark)').matches
+      const textColor = isDark ? '#9ca3af' : '#6b7280'
+      const gridColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'
+      return {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: {
+            labels: { color: textColor, usePointStyle: true, pointStyleWidth: 16, boxHeight: 2, padding: 16 }
+          },
+          tooltip: {
+            callbacks: {
+              label: ctx => ctx.parsed.y != null ? `${ctx.dataset.label}: ${ctx.parsed.y}h` : null
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: textColor, maxTicksLimit: 12, maxRotation: 0 }, grid: { color: gridColor } },
+          y: { min: 0, ticks: { color: textColor, callback: v => v + 'h' }, grid: { color: gridColor } }
+        }
+      }
+    }
+
+    function updateChart() {
+      if (!chartCanvas.value || !chartSeriesData.value) return
+      const s    = chartSeriesData.value
+      const data = {
+        labels: s.labels,
+        datasets: [
+          { label: 'Ideal',   data: s.ideal,   borderColor: 'rgba(156,163,175,0.7)',
+            borderDash: [6,4], borderWidth: 1.5, pointRadius: 0, tension: 0, order: 3 },
+          { label: 'Planned', data: s.planned, borderColor: 'rgba(59,130,246,0.85)',
+            borderWidth: 2, pointRadius: 0, tension: 0.15, order: 2 },
+          { label: 'Actual',  data: s.actual,  borderColor: 'rgba(34,197,94,0.9)',
+            pointBackgroundColor: 'rgba(34,197,94,0.9)',
+            borderWidth: 2.5, pointRadius: 3, tension: 0.15, spanGaps: false, order: 1 }
+        ]
+      }
+      if (chartInstance) {
+        chartInstance.data    = data
+        chartInstance.options = buildChartOptions()
+        chartInstance.update()
+      } else {
+        chartInstance = new Chart(chartCanvas.value, { type: 'line', data, options: buildChartOptions() })
+      }
+    }
+
+    // ── History with year totals ──────────────────────────────────────────────
+
+    const history = computed(() => {
+      void totalActual.value; void goalHours.value  // reactive dependencies
+      const all = loadAll()
+
+      // Build one entry per month
+      const months = Object.entries(all)
+        .sort(([a], [b]) => b.localeCompare(a))
+        .map(([key, data]) => {
+          const [y, m] = key.split('-').map(Number)
+          const wds    = getAllDaysInMonth(y, m).filter(d => !isWeekend(d))
+          const actual = Math.round(wds.reduce((s, d) => s + (data.days?.[d]?.actualHours ?? 0), 0) * 10) / 10
+          const goal   = data.goalHours ?? 0
+          const pct    = goal > 0 ? Math.round((actual / goal) * 100) : 0
+          const isCurrent = key === monthKey.value
+          return {
+            type: 'month', key, year: y, label: getMonthLabel(key),
+            goal, actual, pct, isCurrent,
+            badgeLabel: isCurrent ? 'Current' : pct >= 100 ? 'Met' : 'Missed',
+            badgeCls: isCurrent
+              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-200'
+              : pct >= 100
+                ? 'bg-green-100 text-green-700 dark:bg-green-900/60 dark:text-green-200'
+                : 'bg-orange-100 text-orange-700 dark:bg-orange-900/60 dark:text-orange-200'
+          }
+        })
+
+      // Group by year, append a year-total row after each group
+      const byYear = {}
+      months.forEach(m => { (byYear[m.year] = byYear[m.year] || []).push(m) })
+
+      const result = []
+      Object.keys(byYear).sort((a, b) => b - a).forEach(year => {
+        byYear[year].forEach(m => result.push(m))
+        const totalGoal   = byYear[year].reduce((s, m) => s + m.goal, 0)
+        const totalActualY = Math.round(byYear[year].reduce((s, m) => s + m.actual, 0) * 10) / 10
+        const pct         = totalGoal > 0 ? Math.round((totalActualY / totalGoal) * 100) : 0
+        result.push({ type: 'year', year: Number(year), totalGoal, totalActual: totalActualY, pct })
+      })
+      return result
+    })
+
+    // ── Keyboard navigation ───────────────────────────────────────────────────
+
+    function onEnter(e) {
+      if (!tableBody.value) return
+      const inputs = Array.from(tableBody.value.querySelectorAll('input[data-nav]'))
+      const idx    = inputs.indexOf(e.target)
+      if (idx !== -1 && idx < inputs.length - 1) {
+        inputs[idx + 1].focus()
+        inputs[idx + 1].select()
+      }
+    }
+
+    // ── Display helpers ───────────────────────────────────────────────────────
+
+    function fmtH(n) {
+      if (n == null) return '—'
+      const r = Math.round(n * 10) / 10
+      return (Number.isInteger(r) ? r : r.toFixed(1)) + 'h'
+    }
+
+    function fmtDiff(n) {
+      if (n == null) return '—'
+      const r = Math.round(n * 10) / 10
+      return (r > 0 ? '+' : '') + (Number.isInteger(r) ? r : r.toFixed(1)) + 'h'
+    }
+
+    function diffCls(n) {
+      if (n == null) return 'text-gray-300 dark:text-gray-600'
+      if (n > 0) return 'text-green-600 dark:text-green-400'
+      if (n < 0) return 'text-red-500 dark:text-red-400'
+      return 'text-gray-400'
+    }
+
+    function statusLabel(s) {
+      return { ahead: 'Ahead', 'on-track': 'On Track', behind: 'Behind' }[s] ?? 'On Track'
+    }
+
+    function statusCls(s) {
+      return {
+        ahead:      'bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200',
+        'on-track': 'bg-green-100 text-green-800 dark:bg-green-900/60 dark:text-green-200',
+        behind:     'bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200'
+      }[s] ?? 'bg-green-100 text-green-800'
+    }
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    watch([selectedYear, selectedMonth], () => {
+      initMonth()
+      nextTick(updateChart)
+    }, { immediate: true })
+
+    watch(chartSeriesData, () => nextTick(updateChart), { deep: true })
+    onMounted(() => nextTick(updateChart))
+
+    // ── Template exports ──────────────────────────────────────────────────────
+
+    return {
+      todayStr, selectedYear, selectedMonth, goalHours, monthNotes,
+      days, showWeekends, fillHours, monthKey,
+      allDays, weekdays, visibleDays, futureWorkdays,
+      totalPlanned, totalActual, remainingGoal, avgRequired,
+      onTrackStatus, dayStats, history, hasChartData,
+      chartCanvas, tableBody,
+      setGoalHours, setMonthNotes, setPlanned, setActual, setNotes,
+      fillRemaining, handlePaste, onEnter, rowCls,
+      fmtH, fmtDiff, fmtDate, getDayName, isWeekend,
+      diffCls, statusLabel, statusCls,
+      MONTH_NAMES: [
+        'January','February','March','April','May','June',
+        'July','August','September','October','November','December'
+      ],
+      years: Array.from({ length: 5 }, (_, i) => now.getFullYear() - 2 + i)
+    }
+  }
+}).mount('#app')
+</script>
+</body>
+</html>
