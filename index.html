@@ -158,6 +158,26 @@
 
     </div>
 
+    <!-- ── Status message ───────────────────────────────── -->
+    <div v-if="statusMessage"
+      class="rounded-xl px-4 py-3 text-sm font-medium border"
+      :class="statusMessage.cls">
+      {{ statusMessage.text }}
+    </div>
+
+    <!-- ── Achievement badges ────────────────────────────── -->
+    <div v-if="badges.length > 0" class="flex flex-wrap gap-3">
+      <div v-for="b in badges" :key="b.label"
+        class="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700
+               rounded-xl px-4 py-3 shadow-sm flex items-center gap-3">
+        <span class="text-2xl">{{ b.icon }}</span>
+        <div>
+          <p class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ b.label }}</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">{{ b.sub }}</p>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Day table ──────────────────────────────────── -->
     <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm
                 border border-gray-200 dark:border-gray-600 overflow-hidden">
@@ -391,6 +411,30 @@
       </div>
     </div>
 
+  <!-- ── Toast notification ─────────────────────────────── -->
+  <transition
+    enter-active-class="transition ease-out duration-300"
+    enter-from-class="opacity-0 translate-y-4"
+    enter-to-class="opacity-100 translate-y-0"
+    leave-active-class="transition ease-in duration-200"
+    leave-from-class="opacity-100 translate-y-0"
+    leave-to-class="opacity-0 translate-y-4">
+    <div v-if="toastVisible"
+      class="fixed bottom-6 right-6 z-50 bg-white dark:bg-gray-800 border border-gray-200
+             dark:border-gray-600 rounded-xl shadow-xl px-5 py-4 max-w-sm flex items-start gap-3">
+      <span class="text-2xl">🎉</span>
+      <div class="flex-1">
+        <p class="text-sm font-semibold text-gray-900 dark:text-gray-100">
+          Time for a reward!!! -Brandon
+        </p>
+      </div>
+      <button @click="dismissToast()"
+        class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-lg leading-none">
+        ×
+      </button>
+    </div>
+  </transition>
+
   </main>
 </div><!-- #app -->
 
@@ -619,6 +663,89 @@ createApp({
       return 'behind'
     })
 
+    // ── Gamification ─────────────────────────────────────────────────────────
+
+    // Consecutive past weekdays with actual hours logged (resets on any gap)
+    const streak = computed(() => {
+      const past = weekdays.value.filter(d => d <= todayStr)
+      let n = 0
+      for (let i = past.length - 1; i >= 0; i--) {
+        if (days[past[i]]?.actualHours != null) n++
+        else break
+      }
+      return n
+    })
+
+    // Groups weekdays into calendar weeks (a new group starts each Monday)
+    function getWeekGroups(wds) {
+      const groups = [], g = []
+      for (const d of wds) {
+        const [y, m, day] = d.split('-').map(Number)
+        if (new Date(y, m-1, day).getDay() === 1 && g.length) {
+          groups.push([...g]); g.length = 0
+        }
+        g.push(d)
+      }
+      if (g.length) groups.push(g)
+      return groups
+    }
+
+    const allWeekdaysLogged = computed(() =>
+      weekdays.value.length > 0 && weekdays.value.every(d => days[d]?.actualHours != null)
+    )
+
+    const badges = computed(() => {
+      const wds   = weekdays.value
+      const weeks = getWeekGroups(wds)
+      const earned = []
+
+      if (totalActual.value >= goalHours.value / 2 && goalHours.value > 0)
+        earned.push({ icon: '🎯', label: 'Halfway There', sub: '50% of goal reached! -Brandon' })
+
+      if (totalActual.value >= goalHours.value && goalHours.value > 0)
+        earned.push({ icon: '🏆', label: 'Goal Crusher', sub: 'Monthly goal achieved! -Brandon' })
+
+      if (streak.value >= 5)
+        earned.push({ icon: '🔥', label: 'On a Roll', sub: `${streak.value} days in a row! -Brandon` })
+
+      if (weeks.some(w => w.length === 5 && w.every(d => days[d]?.actualHours != null)))
+        earned.push({ icon: '⭐', label: 'Week Done', sub: 'First full week logged! -Brandon' })
+
+      if (weeks.some(w => w.length === 5 && w.every(d => {
+        const v = days[d]; return v?.actualHours != null && v?.plannedHours != null && v.actualHours >= v.plannedHours
+      })))
+        earned.push({ icon: '💎', label: 'Perfect Week', sub: 'Actual ≥ planned all week! -Brandon' })
+
+      if (allWeekdaysLogged.value)
+        earned.push({ icon: '📅', label: 'Full Month', sub: 'Every workday logged! -Brandon' })
+
+      return earned
+    })
+
+    // Status message tied to on-track position — replaces the cold clinical label with warmth
+    const statusMessage = computed(() => {
+      if (allWeekdaysLogged.value && totalActual.value >= goalHours.value && goalHours.value > 0)
+        return { text: 'Goal reached! You worked so hard this month 🎉 -Brandon', cls: 'bg-green-50 border-green-200 text-green-800 dark:bg-green-900/20 dark:border-green-700 dark:text-green-200' }
+      return ({
+        ahead:      { text: "You're crushing it this month! -Brandon",            cls: 'bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/20 dark:border-blue-700 dark:text-blue-200' },
+        'on-track': { text: "Right where you need to be — keep going! -Brandon",  cls: 'bg-gray-50 border-gray-200 text-gray-700 dark:bg-gray-700/40 dark:border-gray-600 dark:text-gray-300' },
+        behind:     { text: "Every hour counts — you're doing great! -Brandon",   cls: 'bg-orange-50 border-orange-200 text-orange-800 dark:bg-orange-900/20 dark:border-orange-700 dark:text-orange-200' }
+      })[onTrackStatus.value] || null
+    })
+
+    // Toast: fires once per month-session when all days logged AND goal met/exceeded
+    const toastVisible = ref(false)
+    watch(() => [totalActual.value, allWeekdaysLogged.value], () => {
+      const key = `toast_${monthKey.value}`
+      if (allWeekdaysLogged.value && totalActual.value >= goalHours.value && goalHours.value > 0
+          && !sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, '1')
+        toastVisible.value = true
+        setTimeout(() => { toastVisible.value = false }, 9000)
+      }
+    })
+    function dismissToast() { toastVisible.value = false }
+
     // ── Per-row table stats ───────────────────────────────────────────────────
 
     const dayStats = computed(() => {
@@ -836,6 +963,7 @@ createApp({
       fillRemaining, handlePaste, onEnter, rowCls,
       fmtH, fmtDiff, fmtDate, getDayName, isWeekend,
       diffCls, statusLabel, statusCls,
+      streak, badges, statusMessage, toastVisible, dismissToast,
       MONTH_NAMES: [
         'January','February','March','April','May','June',
         'July','August','September','October','November','December'
